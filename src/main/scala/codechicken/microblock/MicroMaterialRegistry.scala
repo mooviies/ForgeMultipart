@@ -6,15 +6,14 @@ import codechicken.lib.render.pipeline.IVertexOperation
 import codechicken.lib.vec.{Cuboid6, Vector3}
 import codechicken.multipart.{IDWriter, MultiPartRegistry}
 import net.minecraft.block.SoundType
+import net.minecraft.client.renderer.RenderType
 import net.minecraft.client.renderer.texture.TextureAtlasSprite
 import net.minecraft.entity.Entity
-import net.minecraft.entity.player.EntityPlayer
+import net.minecraft.entity.player.PlayerEntity
 import net.minecraft.item.{Item, ItemStack}
-import net.minecraft.util.BlockRenderLayer
 import net.minecraft.util.math.RayTraceResult
-import net.minecraftforge.fml.relauncher.{Side, SideOnly}
+import net.minecraftforge.api.distmarker.{Dist, OnlyIn}
 
-import scala.collection.JavaConversions._
 import scala.collection.mutable.{ListBuffer, HashMap => MHashMap}
 
 /**
@@ -24,13 +23,13 @@ trait IMicroMaterial extends Ordered[IMicroMaterial] {
     /**
      * The icon to be used for breaking particles on side
      */
-    @SideOnly(Side.CLIENT)
+    @OnlyIn(Dist.CLIENT)
     def getBreakingIcon(side: Int): TextureAtlasSprite
 
     /**
      * Callback to load icons from the underlying block/etc
      */
-    @SideOnly(Side.CLIENT)
+    @OnlyIn(Dist.CLIENT)
     def loadIcons() {}
 
     /**
@@ -39,16 +38,16 @@ trait IMicroMaterial extends Ordered[IMicroMaterial] {
      *
      * @param pos    The current position to render the cuboid
      * @param side   The side that is being rendered as EnumFacing indexes
-     * @param layer  The current render layer, null for inventory rendering
+     * @param renderType  The current render layer, null for inventory rendering
      * @param bounds The cuboid bounds of the face being rendered
      */
-    @SideOnly(Side.CLIENT)
-    def getMicroRenderOps(pos: Vector3, side: Int, layer: BlockRenderLayer, bounds: Cuboid6): Seq[Seq[IVertexOperation]]
+    @OnlyIn(Dist.CLIENT)
+    def getMicroRenderOps(pos: Vector3, side: Int, renderType: RenderType, bounds: Cuboid6): Seq[Seq[IVertexOperation]]
 
     /**
      * Get the render pass for which this material renders in.
      */
-    def canRenderInLayer(layer: BlockRenderLayer) = layer == BlockRenderLayer.SOLID
+    def canRenderInLayer(renderType: RenderType) = renderType == RenderType.getSolid
 
     /**
      * Return true if this material is not opaque (glass, ice).
@@ -63,7 +62,7 @@ trait IMicroMaterial extends Ordered[IMicroMaterial] {
     /**
      * Return the strength of this material
      */
-    def getStrength(player: EntityPlayer): Float
+    def getStrength(player: PlayerEntity): Float
 
     /**
      * Return the localised name of this material (normally the block name)
@@ -105,7 +104,7 @@ trait IMicroHighlightRenderer {
     /**
      * Return true if a custom highlight was rendered and the default should be skipped
      */
-    def renderHighlight(player: EntityPlayer, hit: RayTraceResult, mcrFactory: CommonMicroFactory, size: Int, material: Int): Boolean
+    def renderHighlight(player: PlayerEntity, hit: RayTraceResult, mcrFactory: CommonMicroFactory, size: Int, material: Int): Boolean
 }
 
 object MicroMaterialRegistry {
@@ -242,7 +241,7 @@ object MicroMaterialRegistry {
 
     def getIdMap = idMap
 
-    def renderHighlight(player: EntityPlayer, hit: RayTraceResult, mcrClass: CommonMicroFactory, size: Int, material: Int): Boolean = {
+    def renderHighlight(player: PlayerEntity, hit: RayTraceResult, mcrClass: CommonMicroFactory, size: Int, material: Int): Boolean = {
         val overridden = highlightRenderers.find(_.renderHighlight(player, hit, mcrClass, size, material))
         if (overridden.isDefined) {
             return true

@@ -1,26 +1,25 @@
 package codechicken.microblock
 
-import java.util.{LinkedList => JLinkedList, List => JList}
+import java.util.{Random, LinkedList => JLinkedList, List => JList}
 
 import codechicken.lib.render.CCRenderState
 import codechicken.lib.render.pipeline.{ColourMultiplier, IVertexOperation}
 import codechicken.lib.texture.TextureUtils
 import codechicken.lib.vec.uv.{IconTransformation, MultiIconTransformation, UVTransformation}
 import codechicken.lib.vec.{Cuboid6, Vector3}
-import net.minecraft.block.Block
-import net.minecraft.block.state.IBlockState
+import net.minecraft.block.{Block, BlockState}
 import net.minecraft.client.Minecraft
-import net.minecraft.client.renderer.block.model.BakedQuad
+import net.minecraft.client.renderer.{RenderType, RenderTypeLookup}
+import net.minecraft.client.renderer.model.BakedQuad
 import net.minecraft.client.renderer.texture.TextureAtlasSprite
 import net.minecraft.entity.Entity
-import net.minecraft.entity.player.EntityPlayer
+import net.minecraft.entity.player.PlayerEntity
 import net.minecraft.item.{Item, ItemStack}
+import net.minecraft.util.Direction
 import net.minecraft.util.math.BlockPos
-import net.minecraft.util.{BlockRenderLayer, EnumFacing}
+import net.minecraft.world.{Explosion, IWorldReader}
+import net.minecraftforge.api.distmarker.{Dist, OnlyIn}
 import net.minecraftforge.common.ForgeHooks
-import net.minecraftforge.fml.relauncher.{Side, SideOnly}
-
-import scala.collection.JavaConversions._
 
 object MaterialRenderHelper {
     private val instances = new ThreadLocal[MaterialRenderHelper] {
@@ -31,11 +30,11 @@ object MaterialRenderHelper {
 }
 
 class MaterialRenderHelper {
-    private var layer: BlockRenderLayer = null
+    private var renderType: RenderType = null
     private var builder = Seq.newBuilder[IVertexOperation]
 
-    def start(pos: Vector3, layer: BlockRenderLayer, uvt: UVTransformation) = {
-        this.layer = layer
+    def start(pos: Vector3, renderType: RenderType, uvt: UVTransformation) = {
+        this.renderType = renderType
         builder.clear()
         builder += pos.translation()
         builder += uvt
@@ -48,7 +47,7 @@ class MaterialRenderHelper {
     }
 
     def lighting() = {
-        if (layer != null) {
+        if (renderType != null) {
             builder += CCRenderState.instance().lightMatrix
         }
         this
@@ -60,26 +59,27 @@ class MaterialRenderHelper {
 /**
  * Standard micro material class suitable for most blocks.
  */
-class BlockMicroMaterial(val state: IBlockState, val materialID: String) extends IMicroMaterial {
-    val blockKey = state.getPropertyKeys
+class BlockMicroMaterial(val state: BlockState, val materialID: String) extends IMicroMaterial {
+    val blockProperties = state.getProperties
+    val random = new Random()
 
-    @SideOnly(Side.CLIENT)
+    @OnlyIn(Dist.CLIENT)
     var icont: MultiIconTransformation = _
 
-    @SideOnly(Side.CLIENT)
+    @OnlyIn(Dist.CLIENT)
     var pIconT: IconTransformation = _
 
-    @SideOnly(Side.CLIENT)
+    @OnlyIn(Dist.CLIENT)
     override def loadIcons() {
-        @SideOnly(Side.CLIENT)
-        def getSideIcon(state: IBlockState, s: Int): TextureAtlasSprite = {
-            val side = EnumFacing.VALUES(s)
-            val model = Minecraft.getMinecraft.getBlockRendererDispatcher.getModelForState(state)
+        @OnlyIn(Dist.CLIENT)
+        def getSideIcon(state: BlockState, s: Int): TextureAtlasSprite = {
+            val side = Direction.byIndex(s)
+            val model = Minecraft.getInstance.getBlockRendererDispatcher.getModelForState(state)
             var winner = if(model.getParticleTexture == null) TextureUtils.getMissingSprite else model.getParticleTexture
             if (model != null) {
                 val quads = new JLinkedList[BakedQuad]
-                quads.addAll(model.getQuads(state, side, 0))
-                quads.addAll(model.getQuads(state, null, 0).filter((quad: BakedQuad) => quad.getFace eq side))
+                quads.addAll(model.getQuads(state, side, random))
+                quads.addAll(model.getQuads(state, null, random).filter((quad: BakedQuad) => quad.getFace eq side))
                 if (quads.size > 0) {
                     val list = new JLinkedList[TextureAtlasSprite]
 
@@ -102,30 +102,30 @@ class BlockMicroMaterial(val state: IBlockState, val materialID: String) extends
         }
     }
 
-    override def getMicroRenderOps(pos: Vector3, side: Int, layer: BlockRenderLayer, bounds: Cuboid6): Seq[Seq[IVertexOperation]] = {
-        Seq(MaterialRenderHelper.instance.start(pos, layer, icont).blockColour(getColour(layer)).lighting().result())
+    override def getMicroRenderOps(pos: Vector3, side: Int, renderType: RenderType, bounds: Cuboid6): Seq[Seq[IVertexOperation]] = {
+        Seq(MaterialRenderHelper.instance.start(pos, renderType, icont).blockColour(getColour(renderType)).lighting().result())
     }
 
-    def getColour(layer: BlockRenderLayer) = {
-        layer match {
+    def getColour(renderType: RenderType) = {
+        renderType match {
             case null =>
-                Minecraft.getMinecraft.getBlockColors.colorMultiplier(state, null, null, 0) << 8 | 0xFF
+                Minecraft.getInstance.getBlockColors.getColor(state, null, null, 0) << 8 | 0xFF
             case _ =>
-                Minecraft.getMinecraft.getBlockColors.colorMultiplier(state,
+                Minecraft.getInstance.getBlockColors.getColor(state,
                     CCRenderState.instance().lightMatrix.access, CCRenderState.instance().lightMatrix.pos, 0) << 8 | 0xFF
         }
     }
 
-    override def canRenderInLayer(layer: BlockRenderLayer) = state.getBlock.canRenderInLayer(state, layer)
+    override def canRenderInLayer(renderType: RenderType) = RenderTypeLookup.canRenderInLayer(state, renderType)
 
-    @SideOnly(Side.CLIENT)
+    @OnlyIn(Dist.CLIENT)
     def getBreakingIcon(side: Int) = pIconT.icon
 
     def getItem = new ItemStack(Item.getItemFromBlock(state.getBlock), 1, state.getBlock.getMetaFromState(state))
 
     def getLocalizedName = getItem.getDisplayName
 
-    def getStrength(player: EntityPlayer) =
+    def getStrength(player: PlayerEntity) =
         ForgeHooks.blockStrength(state, player, player.world, new BlockPos(0, -1, 0))
 
     def isTransparent = !state.isOpaqueCube
@@ -136,9 +136,9 @@ class BlockMicroMaterial(val state: IBlockState, val materialID: String) extends
 
     def getCutterStrength = state.getBlock.getHarvestLevel(state)
 
-    def getSound = state.getBlock.getSoundType
+    def getSound = state.getSoundType
 
-    def explosionResistance(entity: Entity): Float = state.getBlock.getExplosionResistance(entity)
+    def explosionResistance(world: IWorldReader, pos: BlockPos, entity: Entity, explosion: Explosion): Float = state.getExplosionResistance(world, pos, entity, explosion)
 
     override def getMaterialID: String = materialID
 
@@ -162,7 +162,7 @@ object BlockMicroMaterial {
     def materialKey(block: Block): String =
         materialKey(block.getDefaultState)
 
-    def materialKey(state: IBlockState): String = {
+    def materialKey(state: BlockState): String = {
         var key: String = state.getBlock.getRegistryName.toString
         val numOfProps = state.getProperties.size
         if (numOfProps > 0) {
@@ -185,12 +185,12 @@ object BlockMicroMaterial {
         createAndRegister(block.getDefaultState)
     }
 
-    def createAndRegister(state: IBlockState) {
+    def createAndRegister(state: BlockState) {
         val id = materialKey(state)
         MicroMaterialRegistry.registerMaterial(new BlockMicroMaterial(state, id), id)
     }
 
-    def createAndRegister(states: Seq[IBlockState]) {
+    def createAndRegister(states: Seq[BlockState]) {
         states.foreach(createAndRegister)
     }
 
